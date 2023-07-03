@@ -42,3 +42,10 @@ fn test_circuit() {
     assert!(prover.verify().is_err());
     // ANCHOR_END: test-circuit
 }
+
+#[test]
+fn test_poseidon() {
+    // TODO
+    // test that natively calling a poseidon on some values and then verying the result in the circuit passses
+    assert!(true);
+}

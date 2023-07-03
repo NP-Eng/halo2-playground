@@ -6,20 +6,26 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
 };
+// TODO import poseidon types
+// use poseidon_circuit::*;
 
 #[cfg(test)]
 mod tests;
 
-// ANCHOR: field-instructions
+// needed for the poseidon config?
+// const T: usize = 3;
+// const RATE: usize = 2;
+// const R_F: usize = 8;
+// const R_P: usize = 57;
+
 /// A variable representing a number.
 #[derive(Clone)]
 struct Number<F: Field>(AssignedCell<F, F>);
 
-// ANCHOR: field-config
 // The top-level config that provides all necessary columns and permutations
 // for the other configs.
 #[derive(Clone, Debug)]
-struct FieldConfig {
+struct FieldConfig<F: Field> {
     /// For this chip, we will use two advice columns to implement our instructions.
     /// These are also the columns through which we communicate with other parts of
     /// the circuit.
@@ -30,48 +36,38 @@ struct FieldConfig {
 
     add_config: AddConfig,
     mul_config: MulConfig,
+    // TODO add a poseidon config
+    _marker: PhantomData<F>,
 }
-// ANCHOR END: field-config
 
-// ANCHOR: add-config
 #[derive(Clone, Debug)]
 struct AddConfig {
     advice: [Column<Advice>; 2],
     s_add: Selector,
 }
-// ANCHOR_END: add-config
 
-// ANCHOR: mul-config
 #[derive(Clone, Debug)]
 struct MulConfig {
     advice: [Column<Advice>; 2],
     s_mul: Selector,
 }
-// ANCHOR END: mul-config
 
-// ANCHOR: field-chip
 /// The top-level chip that will implement the `FieldInstructions`.
 struct FieldChip<F: Field> {
-    config: FieldConfig,
+    config: FieldConfig<F>,
     _marker: PhantomData<F>,
 }
-// ANCHOR_END: field-chip
 
-// ANCHOR: add-chip
 struct AddChip<F: Field> {
     config: AddConfig,
     _marker: PhantomData<F>,
 }
-// ANCHOR END: add-chip
 
-// ANCHOR: mul-chip
 struct MulChip<F: Field> {
     config: MulConfig,
     _marker: PhantomData<F>,
 }
-// ANCHOR_END: mul-chip
 
-// ANCHOR: add-chip-trait-impl
 impl<F: Field> Chip<F> for AddChip<F> {
     type Config = AddConfig;
     type Loaded = ();
@@ -84,9 +80,7 @@ impl<F: Field> Chip<F> for AddChip<F> {
         &()
     }
 }
-// ANCHOR END: add-chip-trait-impl
 
-// ANCHOR: add-chip-impl
 impl<F: Field> AddChip<F> {
     fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
         Self {
@@ -114,9 +108,7 @@ impl<F: Field> AddChip<F> {
         AddConfig { advice, s_add }
     }
 }
-// ANCHOR END: add-chip-impl
 
-// ANCHOR: add-instructions-impl
 impl<F: Field> FieldChip<F> {
     fn add(
         &self,
@@ -168,9 +160,7 @@ impl<F: Field> AddChip<F> {
         )
     }
 }
-// ANCHOR END: add-instructions-impl
 
-// ANCHOR: mul-chip-trait-impl
 impl<F: Field> Chip<F> for MulChip<F> {
     type Config = MulConfig;
     type Loaded = ();
@@ -183,9 +173,7 @@ impl<F: Field> Chip<F> for MulChip<F> {
         &()
     }
 }
-// ANCHOR END: mul-chip-trait-impl
 
-// ANCHOR: mul-chip-impl
 impl<F: Field> MulChip<F> {
     fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
         Self {
@@ -233,9 +221,7 @@ impl<F: Field> MulChip<F> {
         MulConfig { advice, s_mul }
     }
 }
-// ANCHOR_END: mul-chip-impl
 
-// ANCHOR: mul-instructions-impl
 impl<F: Field> FieldChip<F> {
     fn mul(
         &self,
@@ -286,11 +272,9 @@ impl<F: Field> MulChip<F> {
         )
     }
 }
-// ANCHOR END: mul-instructions-impl
 
-// ANCHOR: field-chip-trait-impl
 impl<F: Field> Chip<F> for FieldChip<F> {
-    type Config = FieldConfig;
+    type Config = FieldConfig<F>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -301,9 +285,7 @@ impl<F: Field> Chip<F> for FieldChip<F> {
         &()
     }
 }
-// ANCHOR_END: field-chip-trait-impl
 
-// ANCHOR: field-chip-impl
 impl<F: Field> FieldChip<F> {
     fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
         Self {
@@ -322,17 +304,16 @@ impl<F: Field> FieldChip<F> {
 
         meta.enable_equality(instance);
 
-        FieldConfig {
+        FieldConfig::<F> {
             advice,
             instance,
             add_config,
             mul_config,
+            _marker: PhantomData,
         }
     }
 }
-// ANCHOR_END: field-chip-impl
 
-// ANCHOR: field-instructions-impl
 impl<F: Field> FieldChip<F> {
     fn load_private(
         &self,
@@ -374,9 +355,7 @@ impl<F: Field> FieldChip<F> {
         layouter.constrain_instance(num.0.cell(), config.instance, row)
     }
 }
-// ANCHOR_END: field-instructions-impl
 
-// ANCHOR: circuit
 /// The full circuit implementation.
 ///
 /// In this struct we store the private input variables. We use `Value<F>` because
@@ -391,7 +370,7 @@ struct MyCircuit<F: Field> {
 
 impl<F: Field> Circuit<F> for MyCircuit<F> {
     // Since we are using a single chip for everything, we can just reuse its config.
-    type Config = FieldConfig;
+    type Config = FieldConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
     #[cfg(feature = "circuit-params")]
     type Params = ();
