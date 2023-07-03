@@ -9,70 +9,11 @@ use halo2_proofs::{
 
 #[cfg(test)]
 mod tests;
+
 // ANCHOR: field-instructions
 /// A variable representing a number.
 #[derive(Clone)]
 struct Number<F: Field>(AssignedCell<F, F>);
-
-trait FieldInstructions<F: Field>: AddInstructions<F> + MulInstructions<F> {
-    /// Variable representing a number.
-    type Num;
-
-    /// Loads a number into the circuit as a private input.
-    fn load_private(
-        &self,
-        layouter: impl Layouter<F>,
-        a: Value<F>,
-    ) -> Result<<Self as FieldInstructions<F>>::Num, Error>;
-
-    /// Returns `d = (a + b) * c`.
-    fn add_and_mul(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: <Self as FieldInstructions<F>>::Num,
-        b: <Self as FieldInstructions<F>>::Num,
-        c: <Self as FieldInstructions<F>>::Num,
-    ) -> Result<<Self as FieldInstructions<F>>::Num, Error>;
-
-    /// Exposes a number as a public input to the circuit.
-    fn expose_public(
-        &self,
-        layouter: impl Layouter<F>,
-        num: <Self as FieldInstructions<F>>::Num,
-        row: usize,
-    ) -> Result<(), Error>;
-}
-// ANCHOR_END: field-instructions
-
-// ANCHOR: add-instructions
-trait AddInstructions<F: Field>: Chip<F> {
-    /// Variable representing a number.
-    type Num;
-
-    /// Returns `c = a + b`.
-    fn add(
-        &self,
-        layouter: impl Layouter<F>,
-        a: Self::Num,
-        b: Self::Num,
-    ) -> Result<Self::Num, Error>;
-}
-// ANCHOR_END: add-instructions
-
-// ANCHOR: mul-instructions
-trait MulInstructions<F: Field>: Chip<F> {
-    /// Variable representing a number.
-    type Num;
-
-    /// Returns `c = a * b`.
-    fn mul(
-        &self,
-        layouter: impl Layouter<F>,
-        a: Self::Num,
-        b: Self::Num,
-    ) -> Result<Self::Num, Error>;
-}
-// ANCHOR_END: mul-instructions
 
 // ANCHOR: field-config
 // The top-level config that provides all necessary columns and permutations
@@ -176,14 +117,13 @@ impl<F: Field> AddChip<F> {
 // ANCHOR END: add-chip-impl
 
 // ANCHOR: add-instructions-impl
-impl<F: Field> AddInstructions<F> for FieldChip<F> {
-    type Num = Number<F>;
+impl<F: Field> FieldChip<F> {
     fn add(
         &self,
         layouter: impl Layouter<F>,
-        a: Self::Num,
-        b: Self::Num,
-    ) -> Result<Self::Num, Error> {
+        a: Number<F>,
+        b: Number<F>,
+    ) -> Result<Number<F>, Error> {
         let config = self.config().add_config.clone();
 
         let add_chip = AddChip::<F>::construct(config, ());
@@ -191,15 +131,13 @@ impl<F: Field> AddInstructions<F> for FieldChip<F> {
     }
 }
 
-impl<F: Field> AddInstructions<F> for AddChip<F> {
-    type Num = Number<F>;
-
+impl<F: Field> AddChip<F> {
     fn add(
         &self,
         mut layouter: impl Layouter<F>,
-        a: Self::Num,
-        b: Self::Num,
-    ) -> Result<Self::Num, Error> {
+        a: Number<F>,
+        b: Number<F>,
+    ) -> Result<Number<F>, Error> {
         let config = self.config();
 
         layouter.assign_region(
@@ -298,29 +236,26 @@ impl<F: Field> MulChip<F> {
 // ANCHOR_END: mul-chip-impl
 
 // ANCHOR: mul-instructions-impl
-impl<F: Field> MulInstructions<F> for FieldChip<F> {
-    type Num = Number<F>;
+impl<F: Field> FieldChip<F> {
     fn mul(
         &self,
         layouter: impl Layouter<F>,
-        a: Self::Num,
-        b: Self::Num,
-    ) -> Result<Self::Num, Error> {
+        a: Number<F>,
+        b: Number<F>,
+    ) -> Result<Number<F>, Error> {
         let config = self.config().mul_config.clone();
         let mul_chip = MulChip::<F>::construct(config, ());
         mul_chip.mul(layouter, a, b)
     }
 }
 
-impl<F: Field> MulInstructions<F> for MulChip<F> {
-    type Num = Number<F>;
-
+impl<F: Field> MulChip<F> {
     fn mul(
         &self,
         mut layouter: impl Layouter<F>,
-        a: Self::Num,
-        b: Self::Num,
-    ) -> Result<Self::Num, Error> {
+        a: Number<F>,
+        b: Number<F>,
+    ) -> Result<Number<F>, Error> {
         let config = self.config();
 
         layouter.assign_region(
@@ -398,14 +333,12 @@ impl<F: Field> FieldChip<F> {
 // ANCHOR_END: field-chip-impl
 
 // ANCHOR: field-instructions-impl
-impl<F: Field> FieldInstructions<F> for FieldChip<F> {
-    type Num = Number<F>;
-
+impl<F: Field> FieldChip<F> {
     fn load_private(
         &self,
         mut layouter: impl Layouter<F>,
         value: Value<F>,
-    ) -> Result<<Self as FieldInstructions<F>>::Num, Error> {
+    ) -> Result<Number<F>, Error> {
         let config = self.config();
 
         layouter.assign_region(
@@ -422,10 +355,10 @@ impl<F: Field> FieldInstructions<F> for FieldChip<F> {
     fn add_and_mul(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: <Self as FieldInstructions<F>>::Num,
-        b: <Self as FieldInstructions<F>>::Num,
-        c: <Self as FieldInstructions<F>>::Num,
-    ) -> Result<<Self as FieldInstructions<F>>::Num, Error> {
+        a: Number<F>,
+        b: Number<F>,
+        c: Number<F>,
+    ) -> Result<Number<F>, Error> {
         let ab = self.add(layouter.namespace(|| "a + b"), a, b)?;
         self.mul(layouter.namespace(|| "(a + b) * c"), ab, c)
     }
@@ -433,7 +366,7 @@ impl<F: Field> FieldInstructions<F> for FieldChip<F> {
     fn expose_public(
         &self,
         mut layouter: impl Layouter<F>,
-        num: <Self as FieldInstructions<F>>::Num,
+        num: Number<F>,
         row: usize,
     ) -> Result<(), Error> {
         let config = self.config();
