@@ -9,6 +9,6 @@ edition = "2021"
 halo2_proofs = { tag = "v2023_04_20", git = "https://github.com/privacy-scaling-explorations/halo2.git", features = [ "dev-graph" ] }
 halo2curves = { git = 'https://github.com/privacy-scaling-explorations/halo2curves', tag = "0.3.2" }
 rand_core = { version = "0.6", default-features = false }
-poseidon-circuit = { git = "https://github.com/scroll-tech/poseidon-circuit.git" }
+# poseidon-circuit = { git = "https://github.com/scroll-tech/poseidon-circuit.git" }
 poseidon = { git = "https://github.com/privacy-scaling-explorations/poseidon" }
 plotters = { version = "0.3.5" }

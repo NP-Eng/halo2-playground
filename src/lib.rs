@@ -7,7 +7,6 @@ use halo2_proofs::{
     poly::Rotation,
 };
 // TODO import poseidon types
-// use poseidon_circuit::*;
 
 #[cfg(test)]
 mod tests;
