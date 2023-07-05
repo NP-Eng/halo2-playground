@@ -1,7 +1,8 @@
 use std::marker::PhantomData;
 
 use halo2_proofs::{
-    arithmetic::Field,
+    // arithmetic::PrimeField,
+    ff::PrimeField,
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
     poly::Rotation,
@@ -20,12 +21,12 @@ mod tests;
 
 /// A variable representing a number.
 #[derive(Clone)]
-struct Number<F: Field>(AssignedCell<F, F>);
+struct Number<F: PrimeField>(AssignedCell<F, F>);
 
 // The top-level config that provides all necessary columns and permutations
 // for the other configs.
 #[derive(Clone, Debug)]
-pub struct FieldConfig<F: Field> {
+pub struct FieldConfig<F: PrimeField> {
     /// For this chip, we will use two advice columns to implement our instructions.
     /// These are also the columns through which we communicate with other parts of
     /// the circuit.
@@ -53,22 +54,22 @@ struct MulConfig {
 }
 
 /// The top-level chip that will implement the `FieldInstructions`.
-struct FieldChip<F: Field> {
+struct FieldChip<F: PrimeField> {
     config: FieldConfig<F>,
     _marker: PhantomData<F>,
 }
 
-struct AddChip<F: Field> {
+struct AddChip<F: PrimeField> {
     config: AddConfig,
     _marker: PhantomData<F>,
 }
 
-struct MulChip<F: Field> {
+struct MulChip<F: PrimeField> {
     config: MulConfig,
     _marker: PhantomData<F>,
 }
 
-impl<F: Field> Chip<F> for AddChip<F> {
+impl<F: PrimeField> Chip<F> for AddChip<F> {
     type Config = AddConfig;
     type Loaded = ();
 
@@ -81,7 +82,7 @@ impl<F: Field> Chip<F> for AddChip<F> {
     }
 }
 
-impl<F: Field> AddChip<F> {
+impl<F: PrimeField> AddChip<F> {
     fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
         Self {
             config,
@@ -109,7 +110,7 @@ impl<F: Field> AddChip<F> {
     }
 }
 
-impl<F: Field> FieldChip<F> {
+impl<F: PrimeField> FieldChip<F> {
     fn add(
         &self,
         layouter: impl Layouter<F>,
@@ -123,7 +124,7 @@ impl<F: Field> FieldChip<F> {
     }
 }
 
-impl<F: Field> AddChip<F> {
+impl<F: PrimeField> AddChip<F> {
     fn add(
         &self,
         mut layouter: impl Layouter<F>,
@@ -161,7 +162,7 @@ impl<F: Field> AddChip<F> {
     }
 }
 
-impl<F: Field> Chip<F> for MulChip<F> {
+impl<F: PrimeField> Chip<F> for MulChip<F> {
     type Config = MulConfig;
     type Loaded = ();
 
@@ -174,7 +175,7 @@ impl<F: Field> Chip<F> for MulChip<F> {
     }
 }
 
-impl<F: Field> MulChip<F> {
+impl<F: PrimeField> MulChip<F> {
     fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
         Self {
             config,
@@ -222,7 +223,7 @@ impl<F: Field> MulChip<F> {
     }
 }
 
-impl<F: Field> FieldChip<F> {
+impl<F: PrimeField> FieldChip<F> {
     fn mul(
         &self,
         layouter: impl Layouter<F>,
@@ -235,7 +236,7 @@ impl<F: Field> FieldChip<F> {
     }
 }
 
-impl<F: Field> MulChip<F> {
+impl<F: PrimeField> MulChip<F> {
     fn mul(
         &self,
         mut layouter: impl Layouter<F>,
@@ -273,7 +274,7 @@ impl<F: Field> MulChip<F> {
     }
 }
 
-impl<F: Field> Chip<F> for FieldChip<F> {
+impl<F: PrimeField> Chip<F> for FieldChip<F> {
     type Config = FieldConfig<F>;
     type Loaded = ();
 
@@ -286,7 +287,7 @@ impl<F: Field> Chip<F> for FieldChip<F> {
     }
 }
 
-impl<F: Field> FieldChip<F> {
+impl<F: PrimeField> FieldChip<F> {
     fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
         Self {
             config,
@@ -314,7 +315,7 @@ impl<F: Field> FieldChip<F> {
     }
 }
 
-impl<F: Field> FieldChip<F> {
+impl<F: PrimeField> FieldChip<F> {
     fn load_private(
         &self,
         mut layouter: impl Layouter<F>,
@@ -362,13 +363,13 @@ impl<F: Field> FieldChip<F> {
 /// they won't have any value during key generation. During proving, if any of these
 /// were `Value::unknown()` we would get an error.
 #[derive(Default)]
-pub struct MyCircuit<F: Field> {
+pub struct MyCircuit<F: PrimeField> {
     a: Value<F>,
     b: Value<F>,
     c: Value<F>,
 }
 
-impl<F: Field> Circuit<F> for MyCircuit<F> {
+impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
     // Since we are using a single chip for everything, we can just reuse its config.
     type Config = FieldConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
