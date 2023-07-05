@@ -1,5 +1,21 @@
-use halo2_proofs::circuit::Value;
+use halo2_proofs::{
+    circuit::{Layouter, SimpleFloorPlanner, Value},
+    dev::MockProver,
+    plonk::{Circuit, ConstraintSystem, Error},
+};
 use halo2curves::ff::Field;
+
+use poseidon::Poseidon;
+use poseidon_circuit::{
+    hash::{PoseidonHashTable, SpongeChip, SpongeConfig},
+    poseidon::{
+        primitives::{Absorbing, P128Pow5T3, VariableLengthIden3},
+        Pow5Chip, Sponge, Pow5Config,
+    },
+    Bn256Fr as Fp, DEFAULT_STEP,
+};
+
+use rand::rngs::OsRng;
 
 use crate::MyCircuit;
 
@@ -45,7 +61,84 @@ fn test_circuit() {
 
 #[test]
 fn test_poseidon() {
-    // TODO
     // test that natively calling a poseidon on some values and then verying the result in the circuit passses
-    assert!(true);
+
+    // TODO what are reasonable parameters?
+    // **** poseidon computation outside of circuit
+    let n_full_rounds = 20;
+    let n_half_rounds = 13;
+    let n_inputs = 13;
+    const T: usize = 3; // according to the constructor, one should have T = RATE + 1. These values match the hard-coded constants of the poseidon circuit
+    const RATE: usize = 2;
+
+    let mut hasher = Poseidon::<Fp, T, RATE>::new(n_full_rounds, n_half_rounds);
+    let inputs = (0..n_inputs)
+        .map(|_| Fp::random(OsRng))
+        .collect::<Vec<Fp>>();
+
+    // absorb inputs
+    hasher.update(&inputs[..]);
+
+    // squeeze outputs
+    let output = hasher.squeeze();
+
+    println!("inputs: {:?}", inputs);
+    println!("output: {:?}", output);
+
+    // **** poseidon computation inside circuit
+    struct TestCircuit(PoseidonHashTable<Fp>, usize);
+
+    // test circuit derived from table data
+    impl Circuit<Fp> for TestCircuit {
+        type Config = SpongeConfig<Fp, Pow5Chip<Fp, 3, 2>>;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            Self(PoseidonHashTable::default(), self.1)
+        }
+
+        fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
+            let hash_tbl = [0; 5].map(|_| meta.advice_column());
+            SpongeConfig::configure_sub(meta, hash_tbl, DEFAULT_STEP)
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl Layouter<Fp>,
+        ) -> Result<(), Error> {
+            let chip = SpongeChip::<Fp, DEFAULT_STEP, Pow5Chip<Fp, 3, 2>>::construct(
+                config,
+                &self.0,
+                self.1,
+                false,
+                Some(Fp::from(42u64)),
+            );
+            chip.load(&mut layouter)
+        }
+    }
+
+    let k = 7;
+    let circuit = TestCircuit(
+        PoseidonHashTable {
+            inputs,
+            ..Default::default()
+        },
+        3,
+    );
+
+    let sponge: Sponge<
+        Fp,
+        Pow5Chip<Fp, T, RATE>,
+        P128Pow5T3<Fp>,
+        Absorbing<Fp, RATE>,
+        VariableLengthIden3,
+        T,
+        RATE,
+    > = Sponge::new(Pow5Chip::<Fp, T, RATE>::construct(), SingleChipLayouter).unwrap();
+
+    let x: SingleChipLayouter;
+
+    let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+    assert_eq!(prover.verify(), Ok(()));
 }
