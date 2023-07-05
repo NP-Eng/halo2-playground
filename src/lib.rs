@@ -25,7 +25,7 @@ struct Number<F: Field>(AssignedCell<F, F>);
 // The top-level config that provides all necessary columns and permutations
 // for the other configs.
 #[derive(Clone, Debug)]
-struct FieldConfig<F: Field> {
+pub struct FieldConfig<F: Field> {
     /// For this chip, we will use two advice columns to implement our instructions.
     /// These are also the columns through which we communicate with other parts of
     /// the circuit.
@@ -362,7 +362,7 @@ impl<F: Field> FieldChip<F> {
 /// they won't have any value during key generation. During proving, if any of these
 /// were `Value::unknown()` we would get an error.
 #[derive(Default)]
-struct MyCircuit<F: Field> {
+pub struct MyCircuit<F: Field> {
     a: Value<F>,
     b: Value<F>,
     c: Value<F>,
