@@ -1,5 +1,6 @@
 use halo2_proofs::circuit::Value;
 use halo2curves::ff::Field;
+use poseidon::Poseidon;
 
 use crate::MyCircuit;
 
@@ -8,6 +9,27 @@ fn test_circuit() {
     use halo2_proofs::dev::MockProver;
     use halo2curves::pasta::Fp;
     use rand_core::OsRng;
+
+    // **** poseidon computation outside of circuit
+    let n_full_rounds = 20;
+    let n_half_rounds = 13;
+    let n_inputs = 13;
+    const T: usize = 3; // according to the constructor, one should have T = RATE + 1. These values match the hard-coded constants of the poseidon circuit
+    const RATE: usize = 2;
+
+    let mut hasher = Poseidon::<Fp, T, RATE>::new(n_full_rounds, n_half_rounds);
+    let inputs = (0..n_inputs)
+        .map(|_| Fp::random(OsRng))
+        .collect::<Vec<Fp>>();
+
+    // absorb inputs
+    hasher.update(&inputs[..]);
+
+    // squeeze outputs
+    let output = hasher.squeeze();
+
+    println!("inputs: {:?}", inputs);
+    println!("output: {:?}", output);
 
     // ANCHOR: test-circuit
     // The number of rows in our circuit cannot exceed 2^k. Since our example
