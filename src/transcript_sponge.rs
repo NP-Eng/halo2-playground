@@ -1,9 +1,38 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, fmt, iter};
 
 use halo2_proofs::{circuit::{Layouter, AssignedCell}, plonk::Error};
 use halo2curves::ff::FromUniformBytes;
-use poseidon_circuit::poseidon::{primitives::{Squeezing, Spec, SpongeMode, Domain, Absorbing}, PoseidonSpongeInstructions, PaddedWord};
+use poseidon_circuit::poseidon::{primitives::{Spec, Domain}, PoseidonSpongeInstructions, PaddedWord};
 
+pub trait TranscriptSpongeMode {}
+
+/// The type used to hold permutation state.
+pub(crate) type State<F, const T: usize> = [F; T];
+
+/// The type used to hold sponge rate.
+pub(crate) type TranscriptSpongeRate<F, const RATE: usize> = [Option<F>; RATE];
+
+/// The absorbing state of the `TranscriptSponge`.
+#[derive(Debug)]
+pub struct TranscriptAbsorbing<F, const RATE: usize>(pub(crate) TranscriptSpongeRate<F, RATE>);
+impl<F, const RATE: usize> TranscriptSpongeMode for TranscriptAbsorbing<F, RATE> {}
+
+/// The squeezing state of the `TranscriptSponge`.
+#[derive(Debug)]
+pub struct TranscriptSqueezing<F, const RATE: usize>(pub(crate) TranscriptSpongeRate<F, RATE>);
+impl<F, const RATE: usize> TranscriptSpongeMode for TranscriptSqueezing<F, RATE> {}
+
+impl<F: fmt::Debug, const RATE: usize> TranscriptAbsorbing<F, RATE> {
+    pub(crate) fn init_with(val: F) -> Self {
+        Self(
+            iter::once(Some(val))
+                .chain((1..RATE).map(|_| None))
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        )
+    }
+}
 
 fn poseidon_sponge<
     F: FromUniformBytes<64> + Ord,
@@ -16,8 +45,8 @@ fn poseidon_sponge<
     chip: &PoseidonChip,
     mut layouter: impl Layouter<F>,
     state: &mut State<PoseidonChip::Word, T>,
-    input: Option<&Absorbing<PaddedWord<F>, RATE>>,
-) -> Result<Squeezing<PoseidonChip::Word, RATE>, Error> {
+    input: Option<&TranscriptAbsorbing<PaddedWord<F>, RATE>>,
+) -> Result<TranscriptSqueezing<PoseidonChip::Word, RATE>, Error> {
     if let Some(input) = input {
         *state = chip.add_input(&mut layouter, state, input)?;
     }
@@ -31,7 +60,7 @@ pub struct Sponge<
     F: FromUniformBytes<64> + Ord,
     PoseidonChip: PoseidonSpongeInstructions<F, S, D, T, RATE>,
     S: Spec<F, T, RATE>,
-    M: SpongeMode,
+    M: TranscriptSpongeMode,
     D: Domain<F, RATE>,
     const T: usize,
     const RATE: usize,
@@ -49,13 +78,13 @@ impl<
         D: Domain<F, RATE>,
         const T: usize,
         const RATE: usize,
-    > Sponge<F, PoseidonChip, S, Absorbing<PaddedWord<F>, RATE>, D, T, RATE>
+    > Sponge<F, PoseidonChip, S, TranscriptAbsorbing<PaddedWord<F>, RATE>, D, T, RATE>
 {
     /// Constructs a new duplex sponge for the given Poseidon specification.
     pub fn new(chip: PoseidonChip, mut layouter: impl Layouter<F>) -> Result<Self, Error> {
         chip.initial_state(&mut layouter).map(|state| Sponge {
             chip,
-            mode: Absorbing(
+            mode: TranscriptAbsorbing(
                 (0..RATE)
                     .map(|_| None)
                     .collect::<Vec<_>>()
@@ -87,7 +116,7 @@ impl<
             &mut self.state,
             Some(&self.mode),
         )?;
-        self.mode = Absorbing::init_with(value);
+        self.mode = TranscriptAbsorbing::init_with(value);
 
         Ok(())
     }
@@ -97,7 +126,7 @@ impl<
     pub fn finish_absorbing(
         mut self,
         mut layouter: impl Layouter<F>,
-    ) -> Result<Sponge<F, PoseidonChip, S, Squeezing<PoseidonChip::Word, RATE>, D, T, RATE>, Error>
+    ) -> Result<Sponge<F, PoseidonChip, S, TranscriptSqueezing<PoseidonChip::Word, RATE>, D, T, RATE>, Error>
     {
         let mode = poseidon_sponge(
             &self.chip,
@@ -122,7 +151,7 @@ impl<
         D: Domain<F, RATE>,
         const T: usize,
         const RATE: usize,
-    > Sponge<F, PoseidonChip, S, Squeezing<PoseidonChip::Word, RATE>, D, T, RATE>
+    > Sponge<F, PoseidonChip, S, TranscriptSqueezing<PoseidonChip::Word, RATE>, D, T, RATE>
 {
     /// Squeezes an element from the sponge.
     pub fn squeeze(&mut self, mut layouter: impl Layouter<F>) -> Result<AssignedCell<F, F>, Error> {
