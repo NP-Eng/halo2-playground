@@ -19,6 +19,8 @@ use halo2_proofs::halo2curves::bn256::Fr;
 #[cfg(test)]
 mod tests;
 
+mod transcript_sponge;
+
 // needed for the poseidon config?
 // const T: usize = 3;
 // const RATE: usize = 3;
