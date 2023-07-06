@@ -12,7 +12,7 @@ fn test_circuit() {
     // ANCHOR: test-circuit
     // The number of rows in our circuit cannot exceed 2^k. Since our example
     // circuit is very small, we can pick a very small value here.
-    let k = 4;
+    let k = 6;
 
     // Prepare the private and public inputs to the circuit!
     let rng = OsRng;

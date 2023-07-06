@@ -11,7 +11,7 @@ fn main() {
         .titled("Example Circuit Layout", ("sans-serif", 60))
         .unwrap();
     let circuit: MyCircuit<Fp> = MyCircuit::default();
-    let k = 5; // Suitable size for MyCircuit
+    let k = 6; // Suitable size for MyCircuit
     CircuitLayout::default()
         .render(k, &circuit, &drawing_area)
         .unwrap();

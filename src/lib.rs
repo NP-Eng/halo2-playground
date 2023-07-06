@@ -1,11 +1,16 @@
 use std::marker::PhantomData;
 
+use halo2_gadgets::poseidon::{
+    primitives::{Absorbing, ConstantLength, Domain, P128Pow5T3, Spec, Squeezing},
+    PaddedWord, Pow5Chip, Pow5Config, Sponge,
+};
 use halo2_proofs::{
     arithmetic::Field,
     circuit::{AssignedCell, Chip, Layouter, Region, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, Selector},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance, Selector},
     poly::Rotation,
 };
+use halo2curves::pasta::Fp;
 // TODO import poseidon types
 
 #[cfg(test)]
@@ -13,30 +18,32 @@ mod tests;
 
 // needed for the poseidon config?
 // const T: usize = 3;
-// const RATE: usize = 2;
+// const RATE: usize = 3;
+// const WIDTH: usize = 3;
 // const R_F: usize = 8;
 // const R_P: usize = 57;
 
 /// A variable representing a number.
 #[derive(Clone)]
-struct Number<F: Field>(AssignedCell<F, F>);
+struct Number<Fp: Field>(AssignedCell<Fp, Fp>);
 
 // The top-level config that provides all necessary columns and permutations
 // for the other configs.
 #[derive(Clone, Debug)]
-pub struct FieldConfig<F: Field> {
+pub struct FieldConfig<Fp: Field, const WIDTH: usize, const RATE: usize> {
     /// For this chip, we will use two advice columns to implement our instructions.
     /// These are also the columns through which we communicate with other parts of
     /// the circuit.
-    advice: [Column<Advice>; 2],
+    advice: [Column<Advice>; WIDTH],
 
     /// Public inputs
     instance: Column<Instance>,
 
     add_config: AddConfig,
     mul_config: MulConfig,
+    sponge_config: Pow5Config<Fp, WIDTH, RATE>,
     // TODO add a poseidon config
-    _marker: PhantomData<F>,
+    _marker: PhantomData<Fp>,
 }
 
 #[derive(Clone, Debug)]
@@ -52,22 +59,22 @@ struct MulConfig {
 }
 
 /// The top-level chip that will implement the `FieldInstructions`.
-struct FieldChip<F: Field> {
-    config: FieldConfig<F>,
-    _marker: PhantomData<F>,
+struct FieldChip<Fp: Field, const WIDTH: usize, const RATE: usize> {
+    config: FieldConfig<Fp, WIDTH, RATE>,
+    _marker: PhantomData<Fp>,
 }
 
-struct AddChip<F: Field> {
+struct AddChip<Fp: Field> {
     config: AddConfig,
-    _marker: PhantomData<F>,
+    _marker: PhantomData<Fp>,
 }
 
-struct MulChip<F: Field> {
+struct MulChip<Fp: Field> {
     config: MulConfig,
-    _marker: PhantomData<F>,
+    _marker: PhantomData<Fp>,
 }
 
-impl<F: Field> Chip<F> for AddChip<F> {
+impl<Fp: Field> Chip<Fp> for AddChip<Fp> {
     type Config = AddConfig;
     type Loaded = ();
 
@@ -80,8 +87,8 @@ impl<F: Field> Chip<F> for AddChip<F> {
     }
 }
 
-impl<F: Field> AddChip<F> {
-    fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
+impl<Fp: Field> AddChip<Fp> {
+    fn construct(config: <Self as Chip<Fp>>::Config, _loaded: <Self as Chip<Fp>>::Loaded) -> Self {
         Self {
             config,
             _marker: PhantomData,
@@ -89,9 +96,9 @@ impl<F: Field> AddChip<F> {
     }
 
     fn configure(
-        meta: &mut ConstraintSystem<F>,
+        meta: &mut ConstraintSystem<Fp>,
         advice: [Column<Advice>; 2],
-    ) -> <Self as Chip<F>>::Config {
+    ) -> <Self as Chip<Fp>>::Config {
         let s_add = meta.selector();
 
         // Define our addition gate!
@@ -108,32 +115,32 @@ impl<F: Field> AddChip<F> {
     }
 }
 
-impl<F: Field> FieldChip<F> {
+impl<Fp: Field, const WIDTH: usize, const RATE: usize> FieldChip<Fp, WIDTH, RATE> {
     fn add(
         &self,
-        layouter: impl Layouter<F>,
-        a: Number<F>,
-        b: Number<F>,
-    ) -> Result<Number<F>, Error> {
+        layouter: impl Layouter<Fp>,
+        a: Number<Fp>,
+        b: Number<Fp>,
+    ) -> Result<Number<Fp>, Error> {
         let config = self.config().add_config.clone();
 
-        let add_chip = AddChip::<F>::construct(config, ());
+        let add_chip = AddChip::<Fp>::construct(config, ());
         add_chip.add(layouter, a, b)
     }
 }
 
-impl<F: Field> AddChip<F> {
+impl<Fp: Field> AddChip<Fp> {
     fn add(
         &self,
-        mut layouter: impl Layouter<F>,
-        a: Number<F>,
-        b: Number<F>,
-    ) -> Result<Number<F>, Error> {
+        mut layouter: impl Layouter<Fp>,
+        a: Number<Fp>,
+        b: Number<Fp>,
+    ) -> Result<Number<Fp>, Error> {
         let config = self.config();
 
         layouter.assign_region(
             || "add",
-            |mut region: Region<'_, F>| {
+            |mut region: Region<'_, Fp>| {
                 // We only want to use a single addition gate in this region,
                 // so we enable it at region offset 0; this means it will constrain
                 // cells at offsets 0 and 1.
@@ -160,7 +167,7 @@ impl<F: Field> AddChip<F> {
     }
 }
 
-impl<F: Field> Chip<F> for MulChip<F> {
+impl<Fp: Field> Chip<Fp> for MulChip<Fp> {
     type Config = MulConfig;
     type Loaded = ();
 
@@ -173,8 +180,8 @@ impl<F: Field> Chip<F> for MulChip<F> {
     }
 }
 
-impl<F: Field> MulChip<F> {
-    fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
+impl<Fp: Field> MulChip<Fp> {
+    fn construct(config: <Self as Chip<Fp>>::Config, _loaded: <Self as Chip<Fp>>::Loaded) -> Self {
         Self {
             config,
             _marker: PhantomData,
@@ -182,9 +189,9 @@ impl<F: Field> MulChip<F> {
     }
 
     fn configure(
-        meta: &mut ConstraintSystem<F>,
+        meta: &mut ConstraintSystem<Fp>,
         advice: [Column<Advice>; 2],
-    ) -> <Self as Chip<F>>::Config {
+    ) -> <Self as Chip<Fp>>::Config {
         for column in &advice {
             meta.enable_equality(*column);
         }
@@ -221,31 +228,31 @@ impl<F: Field> MulChip<F> {
     }
 }
 
-impl<F: Field> FieldChip<F> {
+impl FieldChip<Fp, WIDTH, RATE> {
     fn mul(
         &self,
-        layouter: impl Layouter<F>,
-        a: Number<F>,
-        b: Number<F>,
-    ) -> Result<Number<F>, Error> {
+        layouter: impl Layouter<Fp>,
+        a: Number<Fp>,
+        b: Number<Fp>,
+    ) -> Result<Number<Fp>, Error> {
         let config = self.config().mul_config.clone();
-        let mul_chip = MulChip::<F>::construct(config, ());
+        let mul_chip = MulChip::<Fp>::construct(config, ());
         mul_chip.mul(layouter, a, b)
     }
 }
 
-impl<F: Field> MulChip<F> {
+impl<Fp: Field> MulChip<Fp> {
     fn mul(
         &self,
-        mut layouter: impl Layouter<F>,
-        a: Number<F>,
-        b: Number<F>,
-    ) -> Result<Number<F>, Error> {
+        mut layouter: impl Layouter<Fp>,
+        a: Number<Fp>,
+        b: Number<Fp>,
+    ) -> Result<Number<Fp>, Error> {
         let config = self.config();
 
         layouter.assign_region(
             || "mul",
-            |mut region: Region<'_, F>| {
+            |mut region: Region<'_, Fp>| {
                 // We only want to use a single multiplication gate in this region,
                 // so we enable it at region offset 0; this means it will constrain
                 // cells at offsets 0 and 1.
@@ -272,8 +279,8 @@ impl<F: Field> MulChip<F> {
     }
 }
 
-impl<F: Field> Chip<F> for FieldChip<F> {
-    type Config = FieldConfig<F>;
+impl<Fp: Field, const WIDTH: usize, const RATE: usize> Chip<Fp> for FieldChip<Fp, WIDTH, RATE> {
+    type Config = FieldConfig<Fp, WIDTH, RATE>;
     type Loaded = ();
 
     fn config(&self) -> &Self::Config {
@@ -285,8 +292,8 @@ impl<F: Field> Chip<F> for FieldChip<F> {
     }
 }
 
-impl<F: Field> FieldChip<F> {
-    fn construct(config: <Self as Chip<F>>::Config, _loaded: <Self as Chip<F>>::Loaded) -> Self {
+impl FieldChip<Fp, WIDTH, RATE> {
+    fn construct(config: <Self as Chip<Fp>>::Config, _loaded: <Self as Chip<Fp>>::Loaded) -> Self {
         Self {
             config,
             _marker: PhantomData,
@@ -294,31 +301,46 @@ impl<F: Field> FieldChip<F> {
     }
 
     fn configure(
-        meta: &mut ConstraintSystem<F>,
-        advice: [Column<Advice>; 2],
+        meta: &mut ConstraintSystem<Fp>,
+        advice: [Column<Advice>; WIDTH],
         instance: Column<Instance>,
-    ) -> <Self as Chip<F>>::Config {
-        let add_config = AddChip::configure(meta, advice);
-        let mul_config = MulChip::configure(meta, advice);
+        rc_a: [Column<Fixed>; WIDTH],
+        rc_b: [Column<Fixed>; WIDTH],
+    ) -> <Self as Chip<Fp>>::Config {
+        let add_mul_advice = [advice[0], advice[1]];
+
+        let add_config = AddChip::configure(meta, add_mul_advice);
+        let mul_config = MulChip::configure(meta, add_mul_advice);
+
+        let partial_sbox = meta.advice_column();
+
+        let poseidon_config = Pow5Chip::configure::<P128Pow5T3>(
+            meta,
+            advice.try_into().unwrap(),
+            partial_sbox,
+            rc_a,
+            rc_b,
+        );
 
         meta.enable_equality(instance);
 
-        FieldConfig::<F> {
+        FieldConfig::<Fp, WIDTH, RATE> {
             advice,
             instance,
             add_config,
             mul_config,
+            sponge_config: poseidon_config,
             _marker: PhantomData,
         }
     }
 }
 
-impl<F: Field> FieldChip<F> {
+impl FieldChip<Fp, WIDTH, RATE> {
     fn load_private(
         &self,
-        mut layouter: impl Layouter<F>,
-        value: Value<F>,
-    ) -> Result<Number<F>, Error> {
+        mut layouter: impl Layouter<Fp>,
+        value: Value<Fp>,
+    ) -> Result<Number<Fp>, Error> {
         let config = self.config();
 
         layouter.assign_region(
@@ -334,19 +356,27 @@ impl<F: Field> FieldChip<F> {
     /// Returns `d = (a + b) * c`.
     fn add_and_mul(
         &self,
-        layouter: &mut impl Layouter<F>,
-        a: Number<F>,
-        b: Number<F>,
-        c: Number<F>,
-    ) -> Result<Number<F>, Error> {
+        layouter: &mut impl Layouter<Fp>,
+        a: Number<Fp>,
+        b: Number<Fp>,
+        c: Number<Fp>,
+    ) -> Result<Number<Fp>, Error> {
         let ab = self.add(layouter.namespace(|| "a + b"), a, b)?;
         self.mul(layouter.namespace(|| "(a + b) * c"), ab, c)
     }
 
+    // fn get_fiat_shamir_challenge(
+    //     &self,
+    //     layouter: &mut impl Layouter<Fp>,
+    //     input: Number<Fp>,
+    // ) -> Result<Fp, Error> {
+    //     self.squeeze(layouter.namespace(|| "get_fiat_shamir_challenge"), input)
+    // }
+
     fn expose_public(
         &self,
-        mut layouter: impl Layouter<F>,
-        num: Number<F>,
+        mut layouter: impl Layouter<Fp>,
+        num: Number<Fp>,
         row: usize,
     ) -> Result<(), Error> {
         let config = self.config();
@@ -357,19 +387,24 @@ impl<F: Field> FieldChip<F> {
 
 /// The full circuit implementation.
 ///
-/// In this struct we store the private input variables. We use `Value<F>` because
+/// In this struct we store the private input variables. We use `Value<Fp>` because
 /// they won't have any value during key generation. During proving, if any of these
 /// were `Value::unknown()` we would get an error.
 #[derive(Default)]
-pub struct MyCircuit<F: Field> {
-    a: Value<F>,
-    b: Value<F>,
-    c: Value<F>,
+pub struct MyCircuit<Fp: Field> {
+    a: Value<Fp>,
+    b: Value<Fp>,
+    c: Value<Fp>,
+    // _marker: PhantomData<WIDTH>//: usize, RATE)>,
 }
 
-impl<F: Field> Circuit<F> for MyCircuit<F> {
+const WIDTH: usize = 3;
+const RATE: usize = 2;
+const L: usize = 1;
+
+impl Circuit<Fp> for MyCircuit<Fp> {
     // Since we are using a single chip for everything, we can just reuse its config.
-    type Config = FieldConfig<F>;
+    type Config = FieldConfig<Fp, WIDTH, RATE>;
     type FloorPlanner = SimpleFloorPlanner;
     #[cfg(feature = "circuit-params")]
     type Params = ();
@@ -378,22 +413,44 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
         Self::default()
     }
 
-    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fp>) -> Self::Config {
         // We create the two advice columns that FieldChip uses for I/O.
-        let advice = [meta.advice_column(), meta.advice_column()];
+        let advice = (0..WIDTH).map(|_| meta.advice_column()).collect::<Vec<_>>();
+        // let advice = [meta.advice_column(), meta.advice_column()];
 
         // We also need an instance column to store public inputs.
         let instance = meta.instance_column();
 
-        FieldChip::configure(meta, advice, instance)
+        let rc_a = (0..WIDTH).map(|_| meta.fixed_column()).collect::<Vec<_>>();
+        let rc_b = (0..WIDTH).map(|_| meta.fixed_column()).collect::<Vec<_>>();
+        meta.enable_constant(rc_b[0]);
+
+        FieldChip::<Fp, WIDTH, RATE>::configure(
+            meta,
+            advice.try_into().unwrap(),
+            instance,
+            rc_a.try_into().unwrap(),
+            rc_b.try_into().unwrap(),
+        )
     }
 
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<F>,
+        mut layouter: impl Layouter<Fp>,
     ) -> Result<(), Error> {
-        let field_chip = FieldChip::<F>::construct(config, ());
+        let field_chip = FieldChip::<Fp, WIDTH, RATE>::construct(config.clone(), ());
+        let config = config.sponge_config;
+        let poseidon_chip = Pow5Chip::<Fp, WIDTH, RATE>::construct(config);
+        let mut sponge: Sponge<
+            Fp,
+            Pow5Chip<Fp, WIDTH, RATE>,
+            P128Pow5T3,
+            Absorbing<halo2_gadgets::poseidon::PaddedWord<Fp>, RATE>,
+            ConstantLength<L>,
+            WIDTH,
+            RATE,
+        > = Sponge::new(poseidon_chip, layouter.namespace(|| "new sponge"))?;
 
         // Load our private values into the circuit.
         let a = field_chip.load_private(layouter.namespace(|| "load a"), self.a)?;
@@ -403,7 +460,23 @@ impl<F: Field> Circuit<F> for MyCircuit<F> {
         // Use `add_and_mul` to get `d = (a + b) * c`.
         let d = field_chip.add_and_mul(&mut layouter, a, b, c)?;
 
+        // We need to pad to the multiple of RATE
+        let message = [d.0.clone()];
+        for (i, value) in message
+            .into_iter()
+            .map(PaddedWord::Message)
+            .chain(<ConstantLength<L> as Domain<Fp, RATE>>::padding(L).map(PaddedWord::Padding))
+            .enumerate()
+        {
+            sponge.absorb(layouter.namespace(|| format!("absorb_{i}")), value)?;
+        }
+
+        // TODO figure out how to tackle multiple absorb-squeeze cycles, since current sponge requires calling `finish_absorbing`.
+        let mut sponge = sponge.finish_absorbing(layouter.namespace(|| "finish absorbing"))?;
+        let r = sponge.squeeze(layouter.namespace(|| "squeeze"))?;
+
         // Expose the result as a public input to the circuit.
+        // TODO do something about the randomness r
         field_chip.expose_public(layouter.namespace(|| "expose d"), d, 0)
     }
 }
