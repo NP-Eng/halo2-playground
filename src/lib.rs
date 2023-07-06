@@ -353,25 +353,20 @@ impl FieldChip<Fp, WIDTH, RATE> {
         )
     }
 
-    /// Returns `d = (a + b) * c`.
-    fn add_and_mul(
+    /// Constrains `a == b`.
+    fn constrain(
         &self,
         layouter: &mut impl Layouter<Fp>,
         a: Number<Fp>,
         b: Number<Fp>,
-        c: Number<Fp>,
-    ) -> Result<Number<Fp>, Error> {
-        let ab = self.add(layouter.namespace(|| "a + b"), a, b)?;
-        self.mul(layouter.namespace(|| "(a + b) * c"), ab, c)
+    ) -> Result<(), Error> {
+        Ok(layouter.assign_region(
+            || "equality",
+            |mut region: Region<'_, Fp>| region.constrain_equal(a.0.cell(), b.0.cell()),
+        )?)
+        // let ab = self.add(layouter.namespace(|| "a + b"), a, b)?;
+        // self.mul(layouter.namespace(|| "(a + b) * c"), ab, c)
     }
-
-    // fn get_fiat_shamir_challenge(
-    //     &self,
-    //     layouter: &mut impl Layouter<Fp>,
-    //     input: Number<Fp>,
-    // ) -> Result<Fp, Error> {
-    //     self.squeeze(layouter.namespace(|| "get_fiat_shamir_challenge"), input)
-    // }
 
     fn expose_public(
         &self,
@@ -394,7 +389,6 @@ impl FieldChip<Fp, WIDTH, RATE> {
 pub struct MyCircuit<Fp: Field> {
     a: Value<Fp>,
     b: Value<Fp>,
-    c: Value<Fp>,
     // _marker: PhantomData<WIDTH>//: usize, RATE)>,
 }
 
@@ -455,13 +449,15 @@ impl Circuit<Fp> for MyCircuit<Fp> {
         // Load our private values into the circuit.
         let a = field_chip.load_private(layouter.namespace(|| "load a"), self.a)?;
         let b = field_chip.load_private(layouter.namespace(|| "load b"), self.b)?;
-        let c = field_chip.load_private(layouter.namespace(|| "load c"), self.c)?;
 
         // Use `add_and_mul` to get `d = (a + b) * c`.
-        let d = field_chip.add_and_mul(&mut layouter, a, b, c)?;
+        let c = field_chip.add(layouter.namespace(|| "a + b"), a.clone(), b.clone())?;
+
+        // Expose the result as a public input to the circuit.
+        field_chip.expose_public(layouter.namespace(|| "expose c"), c.clone(), 0)?;
 
         // We need to pad to the multiple of RATE
-        let message = [d.0.clone()];
+        let message = [c.0.clone()];
         for (i, value) in message
             .into_iter()
             .map(PaddedWord::Message)
@@ -475,8 +471,15 @@ impl Circuit<Fp> for MyCircuit<Fp> {
         let mut sponge = sponge.finish_absorbing(layouter.namespace(|| "finish absorbing"))?;
         let r = sponge.squeeze(layouter.namespace(|| "squeeze"))?;
 
-        // Expose the result as a public input to the circuit.
-        // TODO do something about the randomness r
-        field_chip.expose_public(layouter.namespace(|| "expose d"), d, 0)
+        let ra = field_chip.mul(layouter.namespace(|| "mul r * a"), Number(r.clone()), a);
+        let rb = field_chip.mul(layouter.namespace(|| "mul r * b"), Number(r.clone()), b);
+
+        let r_ab = field_chip.add(layouter.namespace(|| "add r * a + r * b"), ra?, rb?)?;
+
+        let r_c = field_chip.mul(layouter.namespace(|| "mul r * c"), Number(r), c)?;
+
+        field_chip.constrain(&mut layouter, r_ab, r_c)?;
+
+        Ok(())
     }
 }

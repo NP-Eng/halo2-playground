@@ -18,19 +18,17 @@ fn test_circuit() {
     let rng = OsRng;
     let a = Fp::random(rng);
     let b = Fp::random(rng);
-    let c = Fp::random(rng);
-    let d = (a + b) * c;
+    let c = a + b;
 
     // Instantiate the circuit with the private inputs.
     let circuit = MyCircuit {
         a: Value::known(a),
         b: Value::known(b),
-        c: Value::known(c),
     };
 
     // Arrange the public input. We expose the multiplication result in row 0
     // of the instance column, so we position it there in our public inputs.
-    let mut public_inputs = vec![d];
+    let mut public_inputs = vec![c];
 
     // Given the correct public input, our circuit will verify.
     let prover = MockProver::run(k, &circuit, vec![public_inputs.clone()]).unwrap();
